@@ -1,5 +1,15 @@
 #include <Arduino.h>
-// Pin defines
+/**
+ * @file ecu.ino
+ * @author your name (you@domain.com)
+ * @brief
+ * @version 0.1
+ * @date 2022-05-15
+ *
+ * @copyright Copyright (c) 2022
+ *
+ */
+
 #define i_pinPedalRed 19
 #define i_pinPedalBlack 20
 #define o_pinThrottleRight 9
@@ -12,8 +22,8 @@
 #define o_pinBrakeanRight 14
 #define o_pinBrakeanLeft 13
 #define i_pinDifferentialLock 16
-#define i_pinSlowDrive 10 // TODO:
-#define i_pinFastDrive 9  // TODO:
+#define i_pinSlowDrive 10
+#define i_pinFastDrive 9
 #define o_pinFootSwitchRight 7
 #define o_pinFootSwitchLeft 6
 #define i_pinVelocity 22
@@ -25,24 +35,186 @@
 #define noThrottleBlack 335
 #define fullThrottleBlack 404
 
+#define angleMiddle 127      // Input from the analog pin, when steering wheel is centered
+#define angleLeft 1          // Input, when steering wheel is all the way to the left
+#define angleRight 255       // Input, when steering wheel is all the way to the right
+#define maxSteeringOutput 30 // max. position of the wheels at maximum steering input in degree
+
 // function prototypes
 int velocityControl(int, int, int, int);
+int sanityCheck();
+int initPins();
+void startUp();
+void driveLoop();
 
-// glonal vars
+// global vars
 bool driveEnabled = false;
 
-void setup()
+int velocityControl(int pedalInputRed, int pedalInputBlack, int angle, int velocity)
+{
+  int vel = 0; // base velocity
+  float temp = 0;
+  int velLeft = 0;
+  int velRight = 0;
+  float absAngleLeft = 0;
+  float absAngleRight = 0;
+
+  int velPercentage = map(pedalInputRed, fullThrottle, noThrottle, 100, 0);
+  // int valBlack = map(pedalInputBlack, fullThrottleBlack, noThrottleBlack, 100, 0);
+
+  if (digitalRead(i_pinFastDrive))
+  {
+    vel = map(pedalInputRed, fullThrottle, noThrottle, 255, 0); // Geschw Begrenzung (60 war ganz okay)
+    vel = int(vel * exp(velPercentage));
+  }
+  else
+  {
+    if (velPercentage > 30)
+    {
+      vel = map(pedalInputRed, fullThrottle, noThrottle, 125, 0);
+    }
+    else
+    {
+      vel = map(pedalInputRed, fullThrottle, noThrottle, 50, 0);
+    }
+  }
+
+  if (!digitalRead(i_pinDifferentialLock))
+  {
+    if (angle < angleMiddle)
+    { // we are going left
+      temp = map(angle, angleMiddle, angleLeft, 100, 0);
+      absAngleLeft = (1 - (temp / 100)) * maxSteeringOutput;
+      absAngleRight = 1;
+    }
+    else if (angle > angleMiddle)
+    { // we are going right
+      temp = map(angle, angleRight, angleMiddle, 100, 0);
+      absAngleRight = (temp / 100) * maxSteeringOutput;
+      absAngleLeft = 1;
+    }
+    velLeft = int(vel * (1 - (absAngleLeft / 100)));
+    velRight = int(vel * (1 - (absAngleRight / 100)));
+    if (velRight > 255)
+    {
+      velRight = 255;
+    }
+    if (velRight < 0)
+    {
+      velRight = 0;
+    }
+    if (velLeft > 255)
+    {
+      velLeft = 255;
+    }
+    if (velLeft < 0)
+    {
+      velLeft = 0;
+    }
+    analogWrite(o_pinThrottleLeft, velLeft);
+    analogWrite(o_pinThrottleRight, velRight);
+  }
+  if (vel > 255)
+  {
+    vel = 255;
+  }
+  if (vel < 0)
+  {
+    vel = 0;
+  }
+  analogWrite(o_pinThrottleLeft, vel);
+  analogWrite(o_pinThrottleRight, vel);
+  return 1;
+}
+
+int sanityCheck()
+{
+  if (digitalRead(i_pinDrive) && digitalRead(i_pinBackwards))
+  {
+    Serial.println("Setup stopped, multiple switch positions detected");
+    return 1;
+  }
+  if (digitalRead(i_pinDrive) && digitalRead(i_pinNeutral))
+  {
+    Serial.println("Setup stopped, multiple switch positions detected");
+  }
+  if (digitalRead(i_pinNeutral) && digitalRead(i_pinBackwards))
+  {
+    Serial.println("Setup stopped, multiple switch positions detected");
+    return 1;
+  }
+
+  if (analogRead(i_pinPedalRed) > (fullThrottle - 10) || analogRead(i_pinPedalRed) < (noThrottle + 20))
+  {
+    Serial.println("Setup stopped, red throttle input not in defined range");
+    return 2;
+  }
+
+  if (analogRead(i_pinPedalBlack) > (fullThrottleBlack + 10) || analogRead(i_pinPedalBlack) < (noThrottleBlack - 20))
+  {
+    Serial.println("Setup stopped, black throttle input not in defined range");
+    return 2;
+  }
+
+  if (analogRead(i_pinAngleSterringWheel) > (angleRight + 20) || analogRead(i_pinAngleSterringWheel) < (angleLeft - 20))
+  {
+    Serial.println("Setup stopped, angle input not in defined range");
+    return 3;
+  }
+  if (digitalRead(i_pinFastDrive) && digitalRead(i_pinSlowDrive))
+  {
+    Serial.println("Setup stopped, drive mode switch in multiple positions or not working");
+    return 4;
+  }
+
+  // TODO: add velocity check
+
+  return 0;
+}
+
+int initPins()
 {
   pinMode(i_pinPedalRed, INPUT);
   pinMode(i_pinPedalBlack, INPUT);
+  pinMode(i_pinAngleSterringWheel, INPUT);
+  pinMode(i_pinBackwards, INPUT);
+  pinMode(i_pinNeutral, INPUT);
+  pinMode(i_pinDrive, INPUT);
+  pinMode(i_pinBrakeSignal, INPUT);
+  pinMode(i_pinDifferentialLock, INPUT);
+  pinMode(i_pinSlowDrive, INPUT);
+  pinMode(i_pinFastDrive, INPUT);
+  pinMode(i_pinVelocity, INPUT);
+  pinMode(o_pinBrakeanRight, OUTPUT);
+  pinMode(o_pinBrakeanLeft, OUTPUT);
+  pinMode(o_pinFootSwitchRight, OUTPUT);
+  pinMode(o_pinFootSwitchLeft, OUTPUT);
   pinMode(o_pinThrottleLeft, OUTPUT);
   pinMode(o_pinThrottleRight, OUTPUT);
-  Serial.begin(115200);
-  Serial.println("Setup succesful!");
-  Serial.println(" ");
+  return 0;
 }
 
-void loop()
+void startUp()
+{
+  initPins();
+  int sanity = sanityCheck();
+  if (sanity < 1)
+  {
+    Serial.println("Setup succesful!");
+    Serial.println(" ");
+  }
+  else
+  {
+    Serial.print("Setup aborted with error code ");
+    Serial.println(sanity);
+    while (1)
+    {
+      delay(1000);
+    }
+  }
+}
+
+void driveLoop()
 {
   if (digitalRead(i_pinDrive) || digitalRead(i_pinBackwards))
   {
@@ -70,43 +242,19 @@ void loop()
   }
 }
 
-int velocityControl(int pedalInputRed, int pedalInputBlack, int angle, int velocity)
+/*
+ *
+ * Arduino setup and loop
+ *
+ */
+
+void setup()
 {
-  int val;
-  int valPercentage = map(pedalInputRed, fullThrottle, noThrottle, 100, 0);
-  int valBlack = map(pedalInputBlack, fullThrottleBlack, noThrottleBlack, 100, 0);
+  Serial.begin(115200);
+  startUp();
+}
 
-  if (!digitalRead(i_pinDifferentialLock))
-  {
-    // do some differential stuff
-    return 0;
-  }
-  if (digitalRead(i_pinFastDrive))
-  {
-    val = map(pedalInputRed, fullThrottle, noThrottle, 255, 0); // Geschw Begrenzung (60 war ganz okay)
-    val = int(val * exp(valPercentage));
-  }
-  else
-  {
-    if (valPercentage > 30)
-    {
-      val = map(pedalInputRed, fullThrottle, noThrottle, 125, 0);
-    }
-    else
-    {
-      val = map(pedalInputRed, fullThrottle, noThrottle, 50, 0);
-    }
-  }
-
-  if (val > 255)
-  {
-    val = 255;
-  }
-  if (val < 0)
-  {
-    val = 0;
-  }
-  analogWrite(o_pinThrottleLeft, val);
-  analogWrite(o_pinThrottleRight, val);
-  return 1;
+void loop()
+{
+  driveLoop();
 }
