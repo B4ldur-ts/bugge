@@ -46,9 +46,19 @@ int sanityCheck();
 int initPins();
 void startUp();
 void driveLoop();
+void enableDrive();
 
 // global vars
 bool driveEnabled = false;
+bool throttleEnabled = false;
+enum Direction
+{
+  forwards,
+  backwards,
+  neutral
+};
+
+Direction driveDirection = neutral;
 
 int velocityControl(int pedalInputRed, int pedalInputBlack, int angle, int velocity)
 {
@@ -113,6 +123,7 @@ int velocityControl(int pedalInputRed, int pedalInputBlack, int angle, int veloc
     }
     analogWrite(o_pinThrottleLeft, velLeft);
     analogWrite(o_pinThrottleRight, velRight);
+    return 0;
   }
   if (vel > 255)
   {
@@ -216,12 +227,25 @@ void startUp()
 
 void driveLoop()
 {
-  if (digitalRead(i_pinDrive) || digitalRead(i_pinBackwards))
+  if (digitalRead(i_pinDrive) && driveDirection == neutral)
   {
-    digitalWrite(o_pinFootSwitchLeft, HIGH);
-    digitalWrite(o_pinFootSwitchRight, HIGH);
-    driveEnabled = true;
-
+    driveDirection = forwards;
+    enableDrive();
+  }
+  else if (digitalRead(i_pinBackwards) && driveDirection == neutral)
+  {
+    driveDirection = backwards;
+    enableDrive();
+  }
+  else if (digitalRead(i_pinNeutral))
+  {
+    driveDirection = neutral;
+    digitalWrite(o_pinFootSwitchLeft, LOW);
+    digitalWrite(o_pinFootSwitchRight, LOW);
+    driveEnabled = false;
+  }
+  if ((driveDirection == backwards || driveDirection == forwards) && driveEnabled)
+  {
     if (digitalRead(i_pinBrakeSignal))
     {
       digitalWrite(o_pinBrakeanLeft, HIGH);
@@ -232,14 +256,16 @@ void driveLoop()
       digitalWrite(o_pinBrakeanLeft, LOW);
       digitalWrite(o_pinBrakeanRight, LOW);
     }
+
     velocityControl(analogRead(i_pinPedalRed), analogRead(i_pinPedalBlack), analogRead(i_pinAngleSterringWheel), analogRead(i_pinVelocity));
   }
-  else
-  {
-    digitalWrite(o_pinFootSwitchLeft, LOW);
-    digitalWrite(o_pinFootSwitchRight, LOW);
-    driveEnabled = false;
-  }
+}
+
+void enableDrive()
+{
+  driveEnabled = true;
+  digitalWrite(o_pinFootSwitchLeft, HIGH);
+  digitalWrite(o_pinFootSwitchRight, HIGH);
 }
 
 /*
