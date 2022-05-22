@@ -10,30 +10,30 @@
  *
  */
 
-#define i_pinPedalRed 19
-#define i_pinPedalBlack 20
-#define o_pinThrottleRight 9
-#define o_pinThrottleLeft 8
-#define i_pinAngleSterringWheel 21
-#define i_pinBackwards 24
-#define i_pinNeutral 25
-#define i_pinDrive 26
-#define i_pinBrakeSignal 15
-#define o_pinBrakeanRight 14
-#define o_pinBrakeanLeft 13
-#define i_pinDifferentialLock 16
-#define i_pinSlowDrive 10
-#define i_pinFastDrive 9
-#define o_pinFootSwitchRight 7
-#define o_pinFootSwitchLeft 6
-#define i_pinVelocity 22
+#define i_pinPedalRed A0
+#define i_pinPedalBlack A1
+#define o_pinThrottleRight 6
+#define o_pinThrottleLeft 5
+#define i_pinAngleSterringWheel 16
+#define i_pinBackwards 19
+#define i_pinNeutral 20
+#define i_pinDrive 21
+#define i_pinBrakeSignal 12
+#define o_pinBrakeanRight 11
+#define o_pinBrakeanLeft 10
+#define i_pinDifferentialLock 13
+#define i_pinSlowDrive 7
+#define i_pinFastDrive 8
+#define o_pinFootSwitchRight 4
+#define o_pinFootSwitchLeft 3
+#define i_pinVelocity 17
 
 // Settings
-#define fullThrottle 330
-#define noThrottle 470
+#define fullThrottle 840
+#define noThrottle 900
 
-#define noThrottleBlack 335
-#define fullThrottleBlack 404
+#define noThrottleBlack 810
+#define fullThrottleBlack 860
 
 #define angleMiddle 127      // Input from the analog pin, when steering wheel is centered
 #define angleLeft 1          // Input, when steering wheel is all the way to the left
@@ -62,14 +62,14 @@ Direction driveDirection = neutral;
 
 int velocityControl(int pedalInputRed, int pedalInputBlack, int angle, int velocity)
 {
-  int vel = 0; // base velocity
+  float vel = 0; // base velocity
   float temp = 0;
-  int velLeft = 0;
-  int velRight = 0;
+  float velLeft = 0;
+  float velRight = 0;
   float absAngleLeft = 0;
   float absAngleRight = 0;
 
-  int velPercentage = map(pedalInputRed, fullThrottle, noThrottle, 100, 0);
+  float velPercentage = map(pedalInputRed, fullThrottle, noThrottle, 100, 0);
   // int valBlack = map(pedalInputBlack, fullThrottleBlack, noThrottleBlack, 100, 0);
 
   if (digitalRead(i_pinFastDrive))
@@ -91,20 +91,22 @@ int velocityControl(int pedalInputRed, int pedalInputBlack, int angle, int veloc
 
   if (!digitalRead(i_pinDifferentialLock))
   {
-    if (angle < angleMiddle)
-    { // we are going left
-      temp = map(angle, angleMiddle, angleLeft, 100, 0);
-      absAngleLeft = (1 - (temp / 100)) * maxSteeringOutput;
-      absAngleRight = 1;
-    }
-    else if (angle > angleMiddle)
-    { // we are going right
-      temp = map(angle, angleRight, angleMiddle, 100, 0);
-      absAngleRight = (temp / 100) * maxSteeringOutput;
-      absAngleLeft = 1;
-    }
-    velLeft = int(vel * (1 - (absAngleLeft / 100)));
-    velRight = int(vel * (1 - (absAngleRight / 100)));
+    /* if (angle < angleMiddle)
+     { // we are going left
+       temp = map(angle, angleMiddle, angleLeft, 100, 0);
+       absAngleLeft = (1 - (temp / 100)) * maxSteeringOutput;
+       absAngleRight = 1;
+     }
+     else if (angle > angleMiddle)
+     { // we are going right
+       temp = map(angle, angleRight, angleMiddle, 100, 0);
+       absAngleRight = (temp / 100) * maxSteeringOutput;
+       absAngleLeft = 1;
+     }
+     velLeft = int(vel * (1 - (absAngleLeft / 100)));
+     velRight = int(vel * (1 - (absAngleRight / 100))); */
+
+    Serial.println(velLeft);
     if (velRight > 255)
     {
       velRight = 255;
@@ -121,10 +123,14 @@ int velocityControl(int pedalInputRed, int pedalInputBlack, int angle, int veloc
     {
       velLeft = 0;
     }
-    analogWrite(o_pinThrottleLeft, velLeft);
-    analogWrite(o_pinThrottleRight, velRight);
+    // Only use when angle indicator is not working
+    velLeft = (255 * (velPercentage / 100));
+    velRight = (255 * (velPercentage / 100));
+    // analogWrite(o_pinThrottleRight, int (velRight));
+    analogWrite(o_pinThrottleLeft, int(velLeft));
     return 0;
   }
+  vel = (255 * (velPercentage / 100));
   if (vel > 255)
   {
     vel = 255;
@@ -133,8 +139,10 @@ int velocityControl(int pedalInputRed, int pedalInputBlack, int angle, int veloc
   {
     vel = 0;
   }
+  Serial.println(velLeft);
+  Serial.println("Vel set");
   analogWrite(o_pinThrottleLeft, vel);
-  analogWrite(o_pinThrottleRight, vel);
+  // analogWrite(o_pinThrottleRight, vel);
   return 1;
 }
 
@@ -208,7 +216,8 @@ int initPins()
 void startUp()
 {
   initPins();
-  int sanity = sanityCheck();
+  // int sanity = sanityCheck();
+  int sanity = 0;
   if (sanity < 1)
   {
     Serial.println("Setup succesful!");
@@ -229,16 +238,19 @@ void driveLoop()
 {
   if (digitalRead(i_pinDrive) && driveDirection == neutral)
   {
+    Serial.println("Forward");
     driveDirection = forwards;
     enableDrive();
   }
-  else if (digitalRead(i_pinBackwards) && driveDirection == neutral)
+  if (digitalRead(i_pinBackwards) && driveDirection == neutral)
   {
+    Serial.println("Backward");
     driveDirection = backwards;
     enableDrive();
   }
-  else if (digitalRead(i_pinNeutral))
+  if (analogRead(i_pinNeutral) > 1000)
   {
+    Serial.println("Neutral");
     driveDirection = neutral;
     digitalWrite(o_pinFootSwitchLeft, LOW);
     digitalWrite(o_pinFootSwitchRight, LOW);
@@ -256,7 +268,6 @@ void driveLoop()
       digitalWrite(o_pinBrakeanLeft, LOW);
       digitalWrite(o_pinBrakeanRight, LOW);
     }
-
     velocityControl(analogRead(i_pinPedalRed), analogRead(i_pinPedalBlack), analogRead(i_pinAngleSterringWheel), analogRead(i_pinVelocity));
   }
 }
