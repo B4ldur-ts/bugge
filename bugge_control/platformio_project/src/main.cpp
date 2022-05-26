@@ -1,4 +1,3 @@
-#include <Arduino.h>
 /**
  * @file ecu.ino
  * @author your name (you@domain.com)
@@ -9,6 +8,10 @@
  * @copyright Copyright (c) 2022
  *
  */
+
+#include <Arduino.h>
+#include <TinyGPS++.h>
+#include <SoftwareSerial.h>
 
 #define i_pinPedalRed A0
 #define i_pinPedalBlack A1
@@ -41,7 +44,7 @@
 #define maxSteeringOutput 30 // max. position of the wheels at maximum steering input in degree
 
 // function prototypes
-int velocityControl(int, int, int, int);
+int velocityControl(int, int, int);
 int sanityCheck();
 int initPins();
 void startUp();
@@ -51,6 +54,7 @@ void enableDrive();
 // global vars
 bool driveEnabled = false;
 bool throttleEnabled = false;
+double velocity = 0.0; // in m/s
 enum Direction
 {
   forwards,
@@ -59,8 +63,10 @@ enum Direction
 };
 
 Direction driveDirection = neutral;
+TinyGPSPlus gps;
+SoftwareSerial ss(2, 3); // Pins raussuchen
 
-int velocityControl(int pedalInputRed, int pedalInputBlack, int angle, int velocity)
+int velocityControl(int pedalInputRed, int pedalInputBlack, int angle)
 {
   float vel = 0; // base velocity
   float temp = 0;
@@ -148,6 +154,8 @@ int velocityControl(int pedalInputRed, int pedalInputBlack, int angle, int veloc
 
 int sanityCheck()
 {
+  bool gpsFound = false;
+
   if (digitalRead(i_pinDrive) && digitalRead(i_pinBackwards))
   {
     Serial.println("Setup stopped, multiple switch positions detected");
@@ -186,7 +194,28 @@ int sanityCheck()
     return 4;
   }
 
-  // TODO: add velocity check
+  if (velocity > 3)
+  {
+    String meldung = "Setup stopped, velocity is " + String(velocity) + " m/s";
+    Serial.println(meldung);
+    return 5;
+  }
+  // delay(5000);
+  while (ss.available() > 0)
+  {
+    if (gps.encode(ss.read()))
+    {
+      if (gps.location.isValid())
+      {
+        gpsFound = true;
+      }
+    }
+  }
+  if (!gpsFound)
+  {
+    Serial.println("No GPS found!");
+    // return 6;
+  }
 
   return 0;
 }
@@ -215,7 +244,9 @@ int initPins()
 
 void startUp()
 {
+
   initPins();
+  ss.begin(9600);
   // int sanity = sanityCheck();
   int sanity = 0;
   if (sanity < 1)
@@ -238,15 +269,21 @@ void driveLoop()
 {
   if (digitalRead(i_pinDrive) && driveDirection == neutral)
   {
-    Serial.println("Forward");
-    driveDirection = forwards;
-    enableDrive();
+    if (velocity < 3)
+    {
+      Serial.println("Forward");
+      driveDirection = forwards;
+      enableDrive();
+    }
   }
   if (digitalRead(i_pinBackwards) && driveDirection == neutral)
   {
-    Serial.println("Backward");
-    driveDirection = backwards;
-    enableDrive();
+    if (velocity < 3)
+    {
+      Serial.println("Backward");
+      driveDirection = backwards;
+      enableDrive();
+    }
   }
   if (analogRead(i_pinNeutral) > 1000)
   {
@@ -268,7 +305,7 @@ void driveLoop()
       digitalWrite(o_pinBrakeanLeft, LOW);
       digitalWrite(o_pinBrakeanRight, LOW);
     }
-    velocityControl(analogRead(i_pinPedalRed), analogRead(i_pinPedalBlack), analogRead(i_pinAngleSterringWheel), analogRead(i_pinVelocity));
+    velocityControl(analogRead(i_pinPedalRed), analogRead(i_pinPedalBlack), analogRead(i_pinAngleSterringWheel));
   }
 }
 
@@ -294,4 +331,17 @@ void setup()
 void loop()
 {
   driveLoop();
+  while (ss.available() > 0)
+  {
+    if (gps.encode(ss.read()))
+    {
+      if (gps.location.isUpdated())
+      {
+        if (gps.speed.isValid())
+        {
+          velocity = gps.speed.mps();
+        }
+      }
+    }
+  }
 }
